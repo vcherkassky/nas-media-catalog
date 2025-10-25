@@ -33,11 +33,6 @@ nas-media-catalog/
 - **Server Discovery**: SSDP multicast for Fritz Box media server detection
 - **Content Access**: Direct HTTP URLs to media files via UPnP
 
-### SMB Fallback Support
-- **Purpose**: Alternative access method when UPnP URLs don't work reliably in VLC
-- **Configuration**: Optional SMB credentials in environment variables
-- **URL Generation**: Convert UPnP paths to SMB URLs with proper encoding
-
 ### Playlist Management
 - **Format**: M3U playlists with VLC compatibility focus
 - **Storage**: SQLite database with JSON file path arrays
@@ -214,7 +209,7 @@ def create_vlc_compatible_url(self, url: str) -> str:
 ### Branch Strategy
 - Use feature branches for new functionality
 - Require E2E tests for UI changes
-- Test both UPnP and SMB scenarios
+- Test the UPnP scenario
 
 ### Debugging Approach
 1. Use proper logging instead of print statements
@@ -225,7 +220,7 @@ def create_vlc_compatible_url(self, url: str) -> str:
 ### Release Process
 1. Run full test suite (unit + integration + E2E)
 2. Test on clean environment
-3. Verify both UPnP and SMB functionality
+3. Verify the UPnP functionality
 4. Update documentation as needed
 
 ## 🎵 Media Format Support

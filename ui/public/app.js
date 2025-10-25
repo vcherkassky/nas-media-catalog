@@ -184,6 +184,9 @@ class MediaCatalogApp {
         const fileSize = this.formatFileSize(file.size);
         const modifiedDate = new Date(file.modified_time * 1000).toLocaleDateString();
 
+        // Use UPnP URL for MRL
+        const mrlUrl = file.path;
+
         return `
             <div class="media-item ${this.currentView === 'list' ? 'list-view' : ''} ${isSelected ? 'selected' : ''}" data-file-id="${file.id}">
                 <div class="media-icon ${isVideo ? 'video' : 'audio'}">
@@ -197,6 +200,15 @@ class MediaCatalogApp {
                         <span>${modifiedDate}</span>
                         ${file.share_name ? `<span>${file.share_name}</span>` : ''}
                     </div>
+                </div>
+                <div class="media-actions">
+                    <a class="mrl-link-btn" 
+                       href="${mrlUrl}" 
+                       title="Open in VLC (UPnP URL)"
+                       onclick="event.stopPropagation()">
+                        <i class="fas fa-external-link-alt"></i>
+                        <span class="mrl-label">VLC</span>
+                    </a>
                 </div>
                 <div class="selection-indicator">
                     <i class="fas fa-check"></i>
@@ -670,6 +682,7 @@ class MediaCatalogApp {
             timeout = setTimeout(later, wait);
         };
     }
+
 }
 
 // Initialize the app when DOM is loaded
