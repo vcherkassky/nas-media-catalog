@@ -1,0 +1,29 @@
+{
+  "name": "nas-media-catalog-e2e",
+  "version": "1.0.0",
+  "description": "End-to-end tests for NAS Media Catalog",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "report": "playwright show-report",
+    "install": "playwright install"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.40.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.13"
+  },
+  "keywords": [
+    "e2e",
+    "testing",
+    "playwright",
+    "media",
+    "catalog"
+  ],
+  "author": "",
+  "license": "MIT"
+}

@@ -15,10 +15,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic-settings>=2.1.0",
     "greenlet>=2.0.0",
-    "requests>=2.31.0"
+    "requests>=2.31.0",
+    "pysmb>=1.2.11",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -35,6 +36,10 @@ nas-media-catalog = "nas_media_catalog.main:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+default-groups = "all"
+
+# Set up the package structure
 [tool.hatch.build.targets.wheel]
 packages = ["src/nas_media_catalog"]
 

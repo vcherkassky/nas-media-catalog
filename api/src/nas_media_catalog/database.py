@@ -13,13 +13,64 @@ from sqlalchemy import (
     select,
     text,
 )
+from urllib.parse import unquote
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+
+# Import settings after avoiding circular import
+def _get_settings():
+    from .config import settings
+
+    return settings
+
+
 Base = declarative_base()
+
+
+def _convert_upnp_path_to_smb(
+    upnp_path: str, smb_hostname: str, smb_username: str, smb_password: str
+) -> Optional[str]:
+    """Convert UPnP file path to SMB URL with proper URL encoding."""
+    try:
+        from urllib.parse import quote
+
+        # UPnP paths from Fritz Box typically look like:
+        # http://192.168.178.1:49000/MediaItems/12345.mp4
+        # We need to extract the filename and construct SMB path
+
+        # For now, we'll use a simple heuristic - extract filename from UPnP URL
+        # and assume it's in the root share directory
+        if not upnp_path or not smb_hostname:
+            return None
+
+        # Extract filename from UPnP URL
+        filename = upnp_path.split("/")[-1]
+        if "?" in filename:
+            filename = filename.split("?")[0]
+
+        # URL decode the filename first
+        filename = unquote(filename)
+
+        # Create SMB path - assuming files are in a "Media" share
+        # URL encode the filename for SMB URL
+        encoded_filename = quote(filename, safe="")
+        smb_path = f"/Media/{encoded_filename}"
+
+        # Create VLC-compatible SMB URL
+        if smb_password:
+            auth = f"{smb_username}:{smb_password}@"
+        else:
+            auth = f"{smb_username}@" if smb_username else ""
+
+        return f"smb://{auth}{smb_hostname}{smb_path}"
+
+    except Exception as e:
+        logger.debug(f"Could not convert UPnP path to SMB: {upnp_path} - {e}")
+        return None
 
 
 class MediaFileDB(Base):
@@ -35,6 +86,7 @@ class MediaFileDB(Base):
     file_type = Column(String, nullable=False)
     share_name = Column(String, nullable=False)
     cached_at = Column(DateTime, default=datetime.utcnow)
+    smb_url = Column(String, nullable=True)  # SMB URL for VLC compatibility
 
 
 class PlaylistDB(Base):
@@ -118,6 +170,25 @@ class DatabaseManager:
                         # Extract file extension from title or mime_type
                         file_type = self._get_file_type_from_mime(file.mime_type)
 
+                        # Generate SMB URL if SMB is enabled
+                        smb_url = None
+                        settings = _get_settings()
+                        if (
+                            settings.smb_enabled
+                            and settings.smb_hostname
+                            and settings.smb_username
+                        ):
+                            smb_url = _convert_upnp_path_to_smb(
+                                file.path,
+                                settings.smb_hostname,
+                                settings.smb_username,
+                                settings.smb_password,
+                            )
+                            if smb_url:
+                                logger.debug(
+                                    f"Generated SMB URL for {file.title}: {smb_url}"
+                                )
+
                         db_file = MediaFileDB(
                             path=file.path,  # UPnP URL
                             name=file.title,
@@ -125,6 +196,7 @@ class DatabaseManager:
                             modified_time=datetime.now().timestamp(),  # Convert to timestamp for SQLite
                             file_type=file_type,
                             share_name=share_name,
+                            smb_url=smb_url,  # Add SMB URL
                         )
                     else:
                         # Handle legacy file objects (if any)
@@ -135,6 +207,7 @@ class DatabaseManager:
                             modified_time=file.modified_time,
                             file_type=file.file_type,
                             share_name=share_name,
+                            smb_url=None,  # Legacy files don't have SMB URLs
                         )
                     db_files.append(db_file)
 
@@ -248,18 +321,20 @@ class DatabaseManager:
         """Get statistics about cached media files."""
         async with self.async_session() as session:
             # Count total files
-            total_result = await session.execute("SELECT COUNT(*) FROM media_files")
+            total_result = await session.execute(
+                text("SELECT COUNT(*) FROM media_files")
+            )
             total_files = total_result.scalar()
 
             # Count by share
             share_result = await session.execute(
-                "SELECT share_name, COUNT(*) FROM media_files GROUP BY share_name"
+                text("SELECT share_name, COUNT(*) FROM media_files GROUP BY share_name")
             )
             shares = dict(share_result.fetchall())
 
             # Count by file type
             type_result = await session.execute(
-                "SELECT file_type, COUNT(*) FROM media_files GROUP BY file_type"
+                text("SELECT file_type, COUNT(*) FROM media_files GROUP BY file_type")
             )
             file_types = dict(type_result.fetchall())
 

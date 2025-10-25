@@ -3,11 +3,12 @@
 import asyncio
 import logging
 import json
+import time
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings, setup_logging
@@ -140,13 +141,45 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Basic health check endpoint for Docker health checks."""
+    upnp_connected = (
+        upnp_client is not None and upnp_client.connected_server is not None
+    )
+
+    # For Docker health checks, we want to fail if UPnP is not connected
+    # This will trigger container restart/reconnection attempts
+    if not upnp_connected:
+        raise HTTPException(status_code=503, detail="UPnP server not connected")
+
     return {
         "status": "healthy",
-        "upnp_connected": upnp_client is not None
-        and upnp_client.connected_server is not None,
+        "upnp_connected": upnp_connected,
         "database": "connected",
     }
+
+
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """Detailed health check endpoint with more information."""
+    upnp_connected = (
+        upnp_client is not None and upnp_client.connected_server is not None
+    )
+
+    health_info = {
+        "status": "healthy" if upnp_connected else "degraded",
+        "upnp_connected": upnp_connected,
+        "database": "connected",
+        "timestamp": time.time(),
+    }
+
+    if upnp_client and upnp_client.connected_server:
+        server_info = upnp_client.get_server_info()
+        health_info["upnp_server"] = server_info
+    else:
+        health_info["upnp_server"] = None
+        health_info["upnp_error"] = "No UPnP server connected"
+
+    return health_info
 
 
 @app.post("/scan")
@@ -193,6 +226,64 @@ async def discover_upnp_servers():
         return {"servers": server_list, "count": len(server_list)}
     except Exception as e:
         logger.error(f"Error listing shares: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/upnp/reconnect")
+async def reconnect_upnp_server(
+    server_name: Optional[str] = Query(
+        None, description="Specific server name to connect to"
+    )
+):
+    """Reconnect to UPnP media server, optionally specifying a server name."""
+    global upnp_client, playlist_gen
+
+    try:
+        logger.info("Attempting to reconnect to UPnP media server...")
+
+        if server_name:
+            # Connect to specific server
+            upnp_client = UPnPClient()
+            await upnp_client.discover_media_servers(settings.upnp_discovery_timeout)
+            if upnp_client.connect_to_server(server_name):
+                logger.info(f"Connected to specified UPnP server: {server_name}")
+            else:
+                logger.error(f"Could not connect to specified server: {server_name}")
+                raise HTTPException(
+                    status_code=404, detail=f"Server '{server_name}' not found"
+                )
+        else:
+            # Auto-discover Fritz Box or first available server
+            server = await discover_fritz_box_media_server()
+            if server:
+                upnp_client = UPnPClient()
+                upnp_client.discovered_servers = [server]
+                upnp_client.connect_to_server()
+                logger.info(f"Connected to UPnP media server: {server.name}")
+            else:
+                logger.error("No UPnP media servers found")
+                raise HTTPException(
+                    status_code=404, detail="No UPnP media servers found"
+                )
+
+        if upnp_client and upnp_client.connected_server:
+            playlist_gen = PlaylistGenerator(upnp_client)
+            logger.info("UPnP media server connection successful!")
+
+            server_info = upnp_client.get_server_info()
+            return {
+                "message": "Successfully reconnected to UPnP server",
+                "server": server_info,
+            }
+        else:
+            raise HTTPException(
+                status_code=500, detail="Failed to establish UPnP connection"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reconnecting to UPnP server: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -344,18 +435,32 @@ async def download_playlist_m3u(playlist_id: int):
         # Filter media files that are in the playlist
         playlist_media_files = [f for f in all_media_files if f.path in file_paths]
 
+        # Check if we found all the files
+        if len(playlist_media_files) != len(file_paths):
+            logger.warning(
+                f"Playlist {playlist_id}: Found {len(playlist_media_files)} files out of {len(file_paths)} expected"
+            )
+
+        if not playlist_media_files:
+            raise HTTPException(
+                status_code=404, detail="No media files found for this playlist"
+            )
+
         # Generate M3U content
         m3u_content = playlist_gen.generate_m3u_content(playlist, playlist_media_files)
 
-        # Create safe filename
+        # Create safe filename - use .vlc.m3u to suggest VLC opening
         safe_name = "".join(
             c for c in playlist.name if c.isalnum() or c in (" ", "-", "_")
         ).rstrip()
-        filename = f"{safe_name}.m3u"
+        filename = f"{safe_name}.vlc.m3u"
 
-        return PlainTextResponse(
-            content=m3u_content,
-            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        return Response(
+            content=m3u_content.encode("utf-8"),
+            media_type="audio/x-mpegurl",  # Proper MIME type for M3U files
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
         )
 
     except HTTPException:

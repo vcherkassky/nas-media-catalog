@@ -1,6 +1,7 @@
 """Configuration management for NAS Media Catalog."""
 
 import logging
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
@@ -38,6 +39,12 @@ class Settings(BaseSettings):
         default=True, description="Automatically scan NAS on startup"
     )
 
+    # SMB Settings
+    smb_username: str = Field(default="", description="SMB username for authentication")
+    smb_password: str = Field(default="", description="SMB password for authentication")
+    smb_hostname: str = Field(default="", description="SMB server hostname or IP address")
+    smb_enabled: bool = Field(default=False, description="Enable SMB support for playlist generation")
+
     # Logging
     log_level: str = Field(default="INFO", description="Logging level")
 
@@ -46,7 +53,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-def setup_logging(level: str = None) -> None:
+def setup_logging(level: Optional[str] = None) -> None:
     """
     Configure logging with a consistent format across the application.
 

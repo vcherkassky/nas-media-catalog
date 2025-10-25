@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NAS Media Catalog</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fas fa-film"></i> NAS Media Catalog</h1>
+                <div class="header-actions">
+                    <button id="reconnect-btn" class="btn btn-secondary">
+                        <i class="fas fa-plug"></i> Reconnect UPnP
+                    </button>
+                    <button id="scan-btn" class="btn btn-primary">
+                        <i class="fas fa-sync"></i> Scan Media
+                    </button>
+                    <div class="connection-status" id="connection-status">
+                        <i class="fas fa-circle"></i> <span>Connecting...</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h3><i class="fas fa-search"></i> Filters</h3>
+                    <div class="filter-group">
+                        <label for="search-input">Search</label>
+                        <input type="text" id="search-input" placeholder="Search media files...">
+                    </div>
+                    <div class="filter-group">
+                        <label for="file-type-filter">File Type</label>
+                        <select id="file-type-filter">
+                            <option value="">All Types</option>
+                            <option value="mp4">MP4</option>
+                            <option value="avi">AVI</option>
+                            <option value="mkv">MKV</option>
+                            <option value="mov">MOV</option>
+                            <option value="mp3">MP3</option>
+                            <option value="flac">FLAC</option>
+                            <option value="wav">WAV</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="share-filter">Share</label>
+                        <select id="share-filter">
+                            <option value="">All Shares</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3><i class="fas fa-list"></i> My Playlists</h3>
+                    <div class="playlist-actions">
+                        <button id="new-playlist-btn" class="btn btn-secondary btn-small">
+                            <i class="fas fa-plus"></i> New Playlist
+                        </button>
+                    </div>
+                    <div id="playlists-list" class="playlists-list">
+                        <!-- Playlists will be loaded here -->
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Content Area -->
+            <div class="content">
+                <!-- Tabs -->
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="media">
+                        <i class="fas fa-folder"></i> Media Files
+                    </button>
+                    <button class="tab-btn" data-tab="playlists">
+                        <i class="fas fa-list"></i> Playlists
+                    </button>
+                </div>
+
+                <!-- Media Files Tab -->
+                <div id="media-tab" class="tab-content active">
+                    <div class="content-header">
+                        <h2>Media Files</h2>
+                        <div class="view-controls">
+                            <button id="grid-view-btn" class="view-btn active" data-view="grid">
+                                <i class="fas fa-th"></i>
+                            </button>
+                            <button id="list-view-btn" class="view-btn" data-view="list">
+                                <i class="fas fa-list"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="media-grid" class="media-grid">
+                        <!-- Media files will be loaded here -->
+                    </div>
+                    <div id="loading" class="loading">
+                        <i class="fas fa-spinner fa-spin"></i> Loading media files...
+                    </div>
+                </div>
+
+                <!-- Playlists Tab -->
+                <div id="playlists-tab" class="tab-content">
+                    <div class="content-header">
+                        <h2>All Playlists</h2>
+                        <button id="auto-generate-btn" class="btn btn-secondary">
+                            <i class="fas fa-magic"></i> Auto Generate
+                        </button>
+                    </div>
+                    <div id="playlists-grid" class="playlists-grid">
+                        <!-- Playlists will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Current Playlist Panel -->
+        <div id="current-playlist" class="current-playlist">
+            <div class="playlist-header">
+                <h3><i class="fas fa-list"></i> Current Selection</h3>
+                <button id="clear-selection-btn" class="btn btn-small">
+                    <i class="fas fa-times"></i> Clear
+                </button>
+            </div>
+            <div id="selected-items" class="selected-items">
+                <!-- Selected items will appear here -->
+            </div>
+            <div class="playlist-actions">
+                <button id="save-playlist-btn" class="btn btn-primary btn-full" disabled>
+                    <i class="fas fa-save"></i> Save as Playlist
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- New Playlist Modal -->
+    <div id="playlist-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create New Playlist</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="playlist-name">Playlist Name</label>
+                    <input type="text" id="playlist-name" placeholder="Enter playlist name">
+                </div>
+                <div class="form-group">
+                    <label for="playlist-description">Description (optional)</label>
+                    <textarea id="playlist-description" placeholder="Enter description"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-playlist-btn" class="btn btn-secondary">Cancel</button>
+                <button id="create-playlist-btn" class="btn btn-primary">Create Playlist</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
