@@ -296,6 +296,42 @@ class DatabaseManager:
             )
             return result.scalar_one_or_none()
 
+    async def update_playlist(
+        self,
+        playlist_id: int,
+        name: str,
+        description: Optional[str],
+        file_paths: List[str],
+    ) -> Optional[PlaylistDB]:
+        """Replace an existing playlist's fields. Returns None if not found."""
+        async with self.async_session() as session:
+            try:
+                import json
+
+                result = await session.execute(
+                    select(PlaylistDB).where(PlaylistDB.id == playlist_id)
+                )
+                playlist = result.scalar_one_or_none()
+                if not playlist:
+                    return None
+
+                playlist.name = name
+                playlist.description = description
+                playlist.file_paths = json.dumps(file_paths)
+                playlist.updated_at = datetime.utcnow()
+
+                await session.commit()
+                await session.refresh(playlist)
+                logger.info(
+                    f"Updated playlist {playlist_id} '{name}' with {len(file_paths)} files"
+                )
+                return playlist
+
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error updating playlist: {e}")
+                raise
+
     async def delete_playlist(self, playlist_id: int) -> bool:
         """Delete a playlist."""
         async with self.async_session() as session:

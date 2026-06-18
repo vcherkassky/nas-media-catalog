@@ -5,11 +5,14 @@ import logging
 import json
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, UploadFile, File
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import IntegrityError
 
 from .config import settings, setup_logging
 from .database import (
@@ -400,6 +403,40 @@ async def get_playlist(playlist_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.put("/playlists/{playlist_id}", response_model=PlaylistResponse)
+async def update_playlist(playlist_id: int, playlist_data: PlaylistCreate):
+    """Replace a playlist's name, description, and items."""
+    name = (playlist_data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    if not isinstance(playlist_data.file_paths, list):
+        raise HTTPException(status_code=400, detail="file_paths must be a list")
+
+    try:
+        updated = await db_manager.update_playlist(
+            playlist_id,
+            name=name,
+            description=playlist_data.description or "",
+            file_paths=playlist_data.file_paths,
+        )
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409, detail=f"A playlist named '{name}' already exists"
+        )
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    return PlaylistResponse(
+        id=updated.id,
+        name=updated.name,
+        description=updated.description,
+        file_paths=json.loads(updated.file_paths),
+        created_at=updated.created_at,
+        updated_at=updated.updated_at,
+    )
+
+
 @app.delete("/playlists/{playlist_id}")
 async def delete_playlist(playlist_id: int):
     """Delete a playlist."""
@@ -468,6 +505,166 @@ async def download_playlist_m3u(playlist_id: int):
     except Exception as e:
         logger.error(f"Error downloading playlist: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/media/{file_id}/download.m3u")
+async def download_media_m3u(file_id: int):
+    """Download a single media file as a one-item M3U playlist (opens in VLC)."""
+    if not playlist_gen:
+        raise HTTPException(status_code=503, detail="Playlist generator not available")
+
+    try:
+        all_files = await db_manager.get_media_files()
+        media_file = next((f for f in all_files if f.id == file_id), None)
+        if not media_file:
+            raise HTTPException(status_code=404, detail="Media file not found")
+
+        title = Path(media_file.name).stem or "media"
+        transient = SimpleNamespace(
+            name=title,
+            description=None,
+            file_paths=json.dumps([media_file.path]),
+        )
+        m3u_content = playlist_gen.generate_m3u_content(transient, [media_file])
+
+        safe_name = "".join(
+            c for c in title if c.isalnum() or c in (" ", "-", "_")
+        ).rstrip() or "media"
+        filename = f"{safe_name}.vlc.m3u"
+
+        return Response(
+            content=m3u_content.encode("utf-8"),
+            media_type="audio/x-mpegurl",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating single-file M3U: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _parse_m3u(content: str, fallback_name: str) -> dict:
+    """Parse M3U content into {name, description, urls}. Raises ValueError on bad input."""
+    # Strip BOM and normalise line endings
+    if content.startswith("﻿"):
+        content = content[1:]
+    lines = [line.rstrip("\r") for line in content.split("\n")]
+
+    # First non-empty line must be #EXTM3U
+    first_meaningful = next((line.strip() for line in lines if line.strip()), "")
+    if first_meaningful != "#EXTM3U":
+        raise ValueError("Not a valid M3U file (missing #EXTM3U header)")
+
+    name = fallback_name
+    description_lines: list[str] = []
+    urls: list[str] = []
+    seen_urls: set[str] = set()
+
+    # State: have we seen #PLAYLIST yet? Used to gate description-comment collection.
+    saw_playlist = False
+    in_description_block = False
+    # Hard-coded VLC instructions added by our exporter — skip them in descriptions
+    vlc_instruction_markers = (
+        "TO OPEN IN VLC",
+        "Right-click this file",
+        "drag this file into VLC",
+        "open -a VLC",
+        "Double-clicking opens Apple Music",
+    )
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            in_description_block = False
+            continue
+
+        if line.startswith("#PLAYLIST:"):
+            name = line[len("#PLAYLIST:") :].strip() or fallback_name
+            saw_playlist = True
+            in_description_block = True
+            continue
+
+        if line.startswith("#EXTINF"):
+            in_description_block = False
+            continue
+
+        if line.startswith("#"):
+            if saw_playlist and in_description_block:
+                comment = line.lstrip("#").strip()
+                if comment and not any(m in comment for m in vlc_instruction_markers):
+                    description_lines.append(comment)
+            continue
+
+        # URL line
+        if line not in seen_urls:
+            seen_urls.add(line)
+            urls.append(line)
+        in_description_block = False
+
+    if not urls:
+        raise ValueError("No media URLs found in file")
+
+    description = "\n".join(description_lines).strip()
+    return {"name": name, "description": description, "urls": urls}
+
+
+@app.post("/playlists/import", status_code=201)
+async def import_playlist(file: UploadFile = File(...)):
+    """Import an M3U file as a playlist. URLs are matched against the catalog by exact path."""
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File is not valid UTF-8 text")
+
+    fallback = Path(file.filename or "playlist").stem
+    # Strip the conventional .vlc suffix if present
+    if fallback.endswith(".vlc"):
+        fallback = fallback[: -len(".vlc")]
+    fallback = fallback or "Imported playlist"
+
+    try:
+        parsed = _parse_m3u(content, fallback_name=fallback)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    all_files = await db_manager.get_media_files()
+    catalog_paths = {f.path for f in all_files}
+    matched = [u for u in parsed["urls"] if u in catalog_paths]
+    unmatched = [u for u in parsed["urls"] if u not in catalog_paths]
+
+    from .database import PlaylistCreate as PlaylistCreateModel
+
+    playlist_data = PlaylistCreateModel(
+        name=parsed["name"],
+        description=parsed["description"],
+        file_paths=matched,
+    )
+
+    try:
+        db_playlist = await db_manager.create_playlist(playlist_data)
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A playlist named '{parsed['name']}' already exists",
+        )
+
+    return {
+        "playlist": PlaylistResponse(
+            id=db_playlist.id,
+            name=db_playlist.name,
+            description=db_playlist.description,
+            file_paths=json.loads(db_playlist.file_paths),
+            created_at=db_playlist.created_at,
+            updated_at=db_playlist.updated_at,
+        ),
+        "matched": len(matched),
+        "unmatched": unmatched,
+    }
 
 
 @app.get("/playlists/auto/generate")

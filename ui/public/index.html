@@ -64,6 +64,10 @@
                         <button id="new-playlist-btn" class="btn btn-secondary btn-small">
                             <i class="fas fa-plus"></i> New Playlist
                         </button>
+                        <button id="upload-playlist-btn" class="btn btn-secondary btn-small">
+                            <i class="fas fa-upload"></i> Upload .m3u
+                        </button>
+                        <input type="file" id="upload-playlist-input" accept=".m3u,.vlc.m3u,audio/x-mpegurl" hidden>
                     </div>
                     <div id="playlists-list" class="playlists-list">
                         <!-- Playlists will be loaded here -->
@@ -96,6 +100,16 @@
                             </button>
                         </div>
                     </div>
+                    <div id="edit-mode-banner" class="edit-mode-banner" hidden>
+                        <div class="edit-mode-banner-text">
+                            <i class="fas fa-pencil"></i>
+                            Editing <strong id="edit-mode-banner-name"></strong> — toggle items to add/remove
+                        </div>
+                        <div class="edit-mode-banner-actions">
+                            <button id="banner-save-btn" class="btn btn-primary btn-small">Save</button>
+                            <button id="banner-cancel-btn" class="btn btn-secondary btn-small">Cancel</button>
+                        </div>
+                    </div>
                     <div id="media-grid" class="media-grid">
                         <!-- Media files will be loaded here -->
                     </div>
@@ -108,34 +122,60 @@
                 <div id="playlists-tab" class="tab-content">
                     <div class="content-header">
                         <h2>All Playlists</h2>
-                        <button id="auto-generate-btn" class="btn btn-secondary">
-                            <i class="fas fa-magic"></i> Auto Generate
-                        </button>
+                        <div class="playlists-tab-actions">
+                            <button id="upload-playlist-btn-tab" class="btn btn-secondary">
+                                <i class="fas fa-upload"></i> Upload .m3u
+                            </button>
+                            <button id="auto-generate-btn" class="btn btn-secondary">
+                                <i class="fas fa-magic"></i> Auto Generate
+                            </button>
+                        </div>
                     </div>
                     <div id="playlists-grid" class="playlists-grid">
                         <!-- Playlists will be loaded here -->
                     </div>
                 </div>
             </div>
-        </main>
 
-        <!-- Current Playlist Panel -->
-        <div id="current-playlist" class="current-playlist">
-            <div class="playlist-header">
-                <h3><i class="fas fa-list"></i> Current Selection</h3>
-                <button id="clear-selection-btn" class="btn btn-small">
-                    <i class="fas fa-times"></i> Clear
-                </button>
-            </div>
-            <div id="selected-items" class="selected-items">
-                <!-- Selected items will appear here -->
-            </div>
-            <div class="playlist-actions">
-                <button id="save-playlist-btn" class="btn btn-primary btn-full" disabled>
-                    <i class="fas fa-save"></i> Save as Playlist
-                </button>
-            </div>
-        </div>
+            <!-- Current Playlist Panel (right column) -->
+            <aside id="current-playlist" class="current-playlist" data-mode="building">
+                <div class="playlist-header">
+                    <div class="playlist-header-title">
+                        <h3 id="panel-title-build"><i class="fas fa-list"></i> Current Selection</h3>
+                        <div id="panel-title-edit" class="panel-title-edit" hidden>
+                            <label class="visually-hidden" for="edit-playlist-name">Playlist name</label>
+                            <input type="text" id="edit-playlist-name" class="edit-name-input" placeholder="Playlist name">
+                            <label class="visually-hidden" for="edit-playlist-description">Description</label>
+                            <textarea id="edit-playlist-description" class="edit-description-input" placeholder="Description (optional)" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <button id="clear-selection-btn" class="btn btn-small" title="Clear selection">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div id="selected-items" class="selected-items">
+                    <!-- Selected items will appear here -->
+                </div>
+                <div class="playlist-actions build-actions">
+                    <button id="save-playlist-btn" class="btn btn-primary btn-full" disabled>
+                        <i class="fas fa-save"></i> Save as Playlist
+                    </button>
+                </div>
+                <div class="playlist-actions edit-actions" hidden>
+                    <div class="edit-actions-row">
+                        <button id="edit-save-btn" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Save
+                        </button>
+                        <button id="edit-cancel-btn" class="btn btn-secondary">
+                            Cancel
+                        </button>
+                    </div>
+                    <button id="edit-save-as-new-btn" class="btn btn-link btn-small">
+                        <i class="fas fa-copy"></i> Save as new playlist
+                    </button>
+                </div>
+            </aside>
+        </main>
     </div>
 
     <!-- Modals -->

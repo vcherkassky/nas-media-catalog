@@ -53,9 +53,41 @@ app.post('/api/*', async (req, res) => {
   try {
     const apiPath = req.path.replace('/api', '');
     const fullUrl = `${API_BASE_URL}${apiPath}`;
-    
+    const contentType = req.headers['content-type'] || '';
+
     console.log(`Proxying POST request to: ${fullUrl}`);
-    const response = await axios.post(fullUrl, req.body);
+
+    if (contentType.startsWith('multipart/form-data')) {
+      // Stream the raw request through; preserve the boundary header
+      const response = await axios.post(fullUrl, req, {
+        headers: {
+          'content-type': contentType,
+          'content-length': req.headers['content-length'],
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+      res.status(response.status).json(response.data);
+    } else {
+      const response = await axios.post(fullUrl, req.body);
+      res.json(response.data);
+    }
+  } catch (error) {
+    console.error('API proxy error:', error.message);
+    res.status(error.response?.status || 500).json({
+      error: error.message,
+      details: error.response?.data || 'Unknown error'
+    });
+  }
+});
+
+app.put('/api/*', async (req, res) => {
+  try {
+    const apiPath = req.path.replace('/api', '');
+    const fullUrl = `${API_BASE_URL}${apiPath}`;
+
+    console.log(`Proxying PUT request to: ${fullUrl}`);
+    const response = await axios.put(fullUrl, req.body);
     res.json(response.data);
   } catch (error) {
     console.error('API proxy error:', error.message);

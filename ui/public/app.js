@@ -11,7 +11,10 @@ class MediaCatalogApp {
             fileType: '',
             share: ''
         };
-        
+        this.mode = 'building';
+        this.editingPlaylistId = null;
+        this.editSnapshot = null;
+
         this.init();
     }
 
@@ -80,6 +83,27 @@ class MediaCatalogApp {
         document.getElementById('playlist-modal').addEventListener('click', (e) => {
             if (e.target === e.currentTarget) {
                 this.hidePlaylistModal();
+            }
+        });
+
+        // Edit-mode buttons (in the right-hand panel)
+        document.getElementById('edit-save-btn').addEventListener('click', () => this.saveEditedPlaylist());
+        document.getElementById('edit-save-as-new-btn').addEventListener('click', () => this.saveAsNew());
+        document.getElementById('edit-cancel-btn').addEventListener('click', () => this.cancelEdit());
+
+        // Edit-mode banner buttons (above media grid)
+        document.getElementById('banner-save-btn').addEventListener('click', () => this.saveEditedPlaylist());
+        document.getElementById('banner-cancel-btn').addEventListener('click', () => this.cancelEdit());
+
+        // Upload .m3u — both buttons share the same hidden input
+        const uploadInput = document.getElementById('upload-playlist-input');
+        document.getElementById('upload-playlist-btn').addEventListener('click', () => uploadInput.click());
+        document.getElementById('upload-playlist-btn-tab').addEventListener('click', () => uploadInput.click());
+        uploadInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                this.uploadM3U(file);
+                e.target.value = ''; // reset so the same file can be re-picked
             }
         });
     }
@@ -184,8 +208,7 @@ class MediaCatalogApp {
         const fileSize = this.formatFileSize(file.size);
         const modifiedDate = new Date(file.modified_time * 1000).toLocaleDateString();
 
-        // Use UPnP URL for MRL
-        const mrlUrl = file.path;
+        const m3uUrl = `/api/media/${file.id}/download.m3u`;
 
         return `
             <div class="media-item ${this.currentView === 'list' ? 'list-view' : ''} ${isSelected ? 'selected' : ''}" data-file-id="${file.id}">
@@ -202,9 +225,10 @@ class MediaCatalogApp {
                     </div>
                 </div>
                 <div class="media-actions">
-                    <a class="mrl-link-btn" 
-                       href="${mrlUrl}" 
-                       title="Open in VLC (UPnP URL)"
+                    <a class="mrl-link-btn"
+                       href="${m3uUrl}"
+                       download
+                       title="Download .vlc.m3u to open this file in VLC"
                        onclick="event.stopPropagation()">
                         <i class="fas fa-external-link-alt"></i>
                         <span class="mrl-label">VLC</span>
@@ -230,17 +254,22 @@ class MediaCatalogApp {
         // Add event listeners
         container.querySelectorAll('.playlist-card').forEach(card => {
             const playlistId = parseInt(card.dataset.playlistId);
-            
+
             card.querySelector('.view-playlist-btn').addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.viewPlaylist(playlistId);
             });
-            
+
+            card.querySelector('.edit-playlist-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.enterEditMode(playlistId);
+            });
+
             card.querySelector('.download-playlist-btn').addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.downloadPlaylist(playlistId);
             });
-            
+
             card.querySelector('.delete-playlist-btn').addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.deletePlaylist(playlistId);
@@ -260,13 +289,17 @@ class MediaCatalogApp {
                     ${fileCount} files • Created ${createdDate}
                 </div>
                 <div class="playlist-card-actions">
-                    <button class="btn btn-secondary btn-small view-playlist-btn">
-                        <i class="fas fa-eye"></i> View
+                    <button class="icon-btn view-playlist-btn" title="View">
+                        <i class="fas fa-eye"></i>
                     </button>
-                    <button class="btn btn-secondary btn-small download-playlist-btn">
-                        <i class="fas fa-download"></i> Download
+                    <button class="icon-btn primary edit-playlist-btn" title="Edit">
+                        <i class="fas fa-pencil"></i>
                     </button>
-                    <button class="btn btn-danger btn-small delete-playlist-btn">
+                    <button class="icon-btn download-playlist-btn" title="Download .m3u">
+                        <i class="fas fa-download"></i>
+                    </button>
+                    <span class="spacer"></span>
+                    <button class="icon-btn danger delete-playlist-btn" title="Delete">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -289,11 +322,18 @@ class MediaCatalogApp {
                     <h4>${playlist.name}</h4>
                     <p>${fileCount} files</p>
                     <div class="playlist-item-actions">
-                        <button class="btn btn-secondary btn-small" onclick="app.viewPlaylist(${playlist.id})">
+                        <button class="icon-btn" title="View" onclick="app.viewPlaylist(${playlist.id})">
                             <i class="fas fa-eye"></i>
                         </button>
-                        <button class="btn btn-secondary btn-small" onclick="app.downloadPlaylist(${playlist.id})">
+                        <button class="icon-btn primary edit-playlist-sidebar-btn" title="Edit" onclick="app.enterEditMode(${playlist.id})">
+                            <i class="fas fa-pencil"></i>
+                        </button>
+                        <button class="icon-btn" title="Download .m3u" onclick="app.downloadPlaylist(${playlist.id})">
                             <i class="fas fa-download"></i>
+                        </button>
+                        <span class="spacer"></span>
+                        <button class="icon-btn danger" title="Delete" onclick="app.deletePlaylist(${playlist.id})">
+                            <i class="fas fa-trash"></i>
                         </button>
                     </div>
                 </div>
@@ -606,6 +646,188 @@ class MediaCatalogApp {
         }
     }
 
+    setMode(mode) {
+        this.mode = mode;
+        const panel = document.getElementById('current-playlist');
+        panel.dataset.mode = mode;
+
+        const isEditing = mode === 'editing';
+        document.getElementById('panel-title-build').hidden = isEditing;
+        document.getElementById('panel-title-edit').hidden = !isEditing;
+        document.querySelector('.build-actions').hidden = isEditing;
+        document.querySelector('.edit-actions').hidden = !isEditing;
+
+        const banner = document.getElementById('edit-mode-banner');
+        banner.hidden = !isEditing;
+    }
+
+    enterEditMode(playlistId) {
+        const playlist = this.playlists.find(p => p.id === playlistId);
+        if (!playlist) {
+            this.showToast('Playlist not found', 'error');
+            return;
+        }
+
+        // If we're already editing a different playlist with unsaved changes, confirm first
+        if (this.mode === 'editing' && this.editingPlaylistId !== playlistId && this.hasUnsavedEdits()) {
+            if (!confirm('You have unsaved changes to another playlist. Discard them?')) {
+                return;
+            }
+        }
+
+        this.editingPlaylistId = playlistId;
+        this.editSnapshot = {
+            name: playlist.name,
+            description: playlist.description || '',
+            file_paths: [...playlist.file_paths],
+        };
+
+        // Populate selection from playlist contents (match by file.path)
+        this.selectedItems.clear();
+        for (const file of this.mediaFiles) {
+            if (playlist.file_paths.includes(file.path)) {
+                this.selectedItems.add(file.id);
+            }
+        }
+
+        // Populate inputs and banner
+        document.getElementById('edit-playlist-name').value = playlist.name;
+        document.getElementById('edit-playlist-description').value = playlist.description || '';
+        document.getElementById('edit-mode-banner-name').textContent = playlist.name;
+
+        this.setMode('editing');
+        this.switchTab('media');
+        this.renderMediaFiles();
+        this.renderSelectedItems();
+    }
+
+    exitEditMode({ clearSelection = true } = {}) {
+        this.editingPlaylistId = null;
+        this.editSnapshot = null;
+        if (clearSelection) {
+            this.selectedItems.clear();
+        }
+        document.getElementById('edit-playlist-name').value = '';
+        document.getElementById('edit-playlist-description').value = '';
+        document.getElementById('edit-mode-banner-name').textContent = '';
+        this.setMode('building');
+        this.renderMediaFiles();
+        this.renderSelectedItems();
+    }
+
+    hasUnsavedEdits() {
+        if (this.mode !== 'editing' || !this.editSnapshot) return false;
+        const name = document.getElementById('edit-playlist-name').value.trim();
+        const description = document.getElementById('edit-playlist-description').value.trim();
+        if (name !== this.editSnapshot.name) return true;
+        if (description !== (this.editSnapshot.description || '')) return true;
+        const current = this.currentEditedPaths().sort();
+        const original = [...this.editSnapshot.file_paths].sort();
+        return JSON.stringify(current) !== JSON.stringify(original);
+    }
+
+    currentEditedPaths() {
+        return this.mediaFiles
+            .filter(file => this.selectedItems.has(file.id))
+            .map(file => file.path);
+    }
+
+    async saveEditedPlaylist() {
+        if (this.mode !== 'editing' || this.editingPlaylistId == null) return;
+
+        const name = document.getElementById('edit-playlist-name').value.trim();
+        const description = document.getElementById('edit-playlist-description').value.trim();
+        const file_paths = this.currentEditedPaths();
+
+        if (!name) {
+            this.showToast('Name is required', 'warning');
+            return;
+        }
+        if (file_paths.length === 0) {
+            this.showToast('Cannot save an empty playlist', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.apiBase}/playlists/${this.editingPlaylistId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, description, file_paths }),
+            });
+
+            if (response.status === 404) {
+                this.showToast('Playlist no longer exists', 'error');
+                this.exitEditMode();
+                await this.loadPlaylists();
+                return;
+            }
+            if (response.status === 409) {
+                this.showToast(`A playlist named "${name}" already exists`, 'error');
+                return;
+            }
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || 'Save failed');
+            }
+
+            await this.loadPlaylists();
+            this.showToast(`Saved "${name}"`, 'success');
+            this.exitEditMode();
+        } catch (error) {
+            console.error('Save edit error:', error);
+            this.showToast(`Save failed: ${error.message}`, 'error');
+        }
+    }
+
+    cancelEdit() {
+        if (this.hasUnsavedEdits()) {
+            if (!confirm('Discard unsaved changes?')) return;
+        }
+        this.exitEditMode();
+    }
+
+    saveAsNew() {
+        if (this.mode !== 'editing') return;
+        const name = document.getElementById('edit-playlist-name').value.trim();
+        const description = document.getElementById('edit-playlist-description').value.trim();
+        // Reuse the create modal but pre-fill from edit mode
+        this.showPlaylistModal(true);
+        if (name) document.getElementById('playlist-name').value = name + ' (copy)';
+        if (description) document.getElementById('playlist-description').value = description;
+    }
+
+    async uploadM3U(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch(`${this.apiBase}/playlists/import`, {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                const detail = data?.details?.detail || data?.error || 'Import failed';
+                this.showToast(`Import failed: ${detail}`, 'error');
+                return;
+            }
+
+            await this.loadPlaylists();
+            this.showToast(`Imported "${data.playlist.name}" (${data.matched} items)`, 'success');
+            if (data.unmatched && data.unmatched.length > 0) {
+                this.showToast(
+                    `${data.unmatched.length} item(s) not found in catalog — re-scan to add them`,
+                    'warning'
+                );
+            }
+            this.enterEditMode(data.playlist.id);
+        } catch (error) {
+            console.error('Upload error:', error);
+            this.showToast(`Import failed: ${error.message}`, 'error');
+        }
+    }
+
     async deletePlaylist(playlistId) {
         const playlist = this.playlists.find(p => p.id === playlistId);
         if (!playlist) return;
@@ -682,7 +904,6 @@ class MediaCatalogApp {
             timeout = setTimeout(later, wait);
         };
     }
-
 }
 
 // Initialize the app when DOM is loaded

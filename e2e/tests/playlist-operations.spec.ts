@@ -220,7 +220,7 @@ test.describe('Playlist Operations', () => {
       
       // Click download button on first playlist in sidebar
       const firstPlaylist = sidebarPlaylists.first();
-      const downloadBtn = firstPlaylist.locator('button').nth(1); // Second button is download
+      const downloadBtn = firstPlaylist.locator('button[title^="Download"]');
       await downloadBtn.click();
       
       // Wait for download
